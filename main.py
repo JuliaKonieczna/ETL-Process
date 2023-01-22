@@ -24,6 +24,7 @@ class DataSources(Enum):
         else:
             raise ValueError(f"Unknown data source: {self}")
 
+
 class Param(Enum):
     DATE_FROM = "$date_from"
     DATE_TO = "$date_to"
@@ -31,86 +32,107 @@ class Param(Enum):
 
 
 class Company(ABC):
-    def __init__(self, base_url: str):
+    def __init__(self,
+                 base_url: str,
+                 data_source: DataSources,  # TODO: check if correct type
+                 date_from: datetime,
+                 date_to: Optional[datetime] = None,
+                 ) -> None:
         self.base_url = base_url
+        self.data_source = data_source
+        self.date_from = date_from
+        self.date_to = date_to
+        self.report_file_name = self.get_report_file_name()
 
     @abstractmethod
-    def get_endpoint(self, date_from: datetime, date_to: Optional[datetime] = None) -> None:
+    def get_report_file_name(self) -> str:
+        if self.date_from == self.date_to:
+            report_file_name = f"{self.data_source}_{self.date_from.strftime('%Y%m%d')}.csv"
+        else:
+            report_file_name = f"{self.data_source}_{self.date_from.strftime('%Y%m%d')}-{self.date_to.strftime('%Y%m%d')}.csv"
+        return report_file_name
+
+    @abstractmethod
+    def get_endpoint(self, **kwargs) -> None:
         pass
 
     @abstractmethod
-    def get_report_file_name(self, data_source: str, date_from: datetime, date_to: Optional[datetime]) -> str:
-        if date_from == date_to:
-            report_file_name =  f"{data_source}_{date_from.strftime('%Y%m%d')}.csv"
-        else:
-            report_file_name = f"{data_source}_{date_from.strftime('%Y%m%d')}-{date_to.strftime('%Y%m%d')}.csv"
-        return report_file_name
+    def get_data(self, **kwargs) -> None:
+        pass
 
 
 class PSE(Company):
     endpoint_when_date_range = f"data_od/{Param.DATE_FROM.value}/data_do/{Param.DATE_TO.value}"
     endpoint_when_single_date = f"data/{Param.DATE.value}/unit/all"
 
-    def __init__(self, base_url: str):
-        super().__init__(base_url)
+    def __init__(self,
+                 base_url: str,
+                 data_source: DataSources,  # TODO: check if correct type
+                 date_from: datetime,
+                 date_to: Optional[datetime] = None,
+                 ) -> None:
+        super().__init__(base_url, data_source, date_from, date_to)
 
-    def get_endpoint(
-            self,
-            date_from: datetime,
-            date_to: Optional[datetime] = None,
-    ) -> str:
-        if date_to is not None:
+    def get_report_file_name(self) -> str:
+        report_file_name = super().get_report_file_name()
+        return report_file_name
+
+    def get_endpoint(self) -> str:
+        if self.date_to is not None:
             endpoint = self.base_url + PSE.endpoint_when_date_range
-            endpoint = endpoint.replace(Param.DATE_FROM.value, date_from.strftime("%Y%m%d"))
-            endpoint = endpoint.replace(Param.DATE_TO.value, date_to.strftime("%Y%m%d"))
+            endpoint = endpoint.replace(Param.DATE_FROM.value, self.date_from.strftime("%Y%m%d"))
+            endpoint = endpoint.replace(Param.DATE_TO.value, self.date_to.strftime("%Y%m%d"))
         else:
             endpoint = self.base_url + PSE.endpoint_when_single_date
-            endpoint = endpoint.replace(Param.DATE.value, date_from.strftime("%Y%m%d"))
+            endpoint = endpoint.replace(Param.DATE.value, self.date_from.strftime("%Y%m%d"))
         return endpoint
 
-    def get_report_file_name(
-            self,
-            data_source: str,
-            date_from: datetime,
-            date_to: Optional[datetime]
-    ) -> str:
-        report_file_name = super().get_report_file_name(data_source, date_from, date_to)
-        return report_file_name
+    def get_data(
+            self
+    ) -> None:
+        endpoint = self.get_endpoint()
+        click.echo("Downloading file...")
+        response = requests.get(endpoint)
+        with open(self.report_file_name, "wb") as f:
+            f.write(response.content)
+        click.echo("File downloaded")
 
 
 class TGE(Company):
-    def __init__(self, base_url: str):
-        super().__init__(base_url)
-        
-    def get_endpoint(
-            self,
-            date_from: datetime,
-            date_to: Optional[datetime] = None
-    ) -> List[str]:
-        return [f"{self.base_url}{date.strftime('%Y%m%d')}" for date in pd.date_range(date_from, date_to)]  # TODO: check if it works when date_to is none
+    def __init__(self,
+                 base_url: str,
+                 data_source: DataSources,  # TODO: check if correct type
+                 date_from: datetime,
+                 date_to: Optional[datetime] = None,
+                 ) -> None:
+        super().__init__(base_url, data_source, date_from, date_to)
+
+    def get_endpoint(self, date) -> str:
+        return f"{self.base_url}{date.strftime('%Y%m%d')}"
 
     def get_report_file_name(
             self,
-            data_source: str,
-            date_from: datetime,
-            date_to: Optional[datetime]
     ) -> str:
-        report_file_name = super().get_report_file_name(data_source, date_from, date_to)
+        report_file_name = super().get_report_file_name()
         return report_file_name
 
+    def get_data(
+            self,
+    ) -> List[List[str]]:
+        click.echo("Scraping data...")
+        for date in pd.date_range(self.date_from, self.date_to):
+            endpoint = self.get_endpoint(date)
+            response = requests.get(endpoint)
+            html_content = response.text
 
-def download_csv_file(
-    report_file_name: str,
-    endpoint: str,
-    date_from: datetime,
-    date_to: Optional[datetime]
-) -> str:
-    click.echo("Downloading file...")
-    response = requests.get(endpoint)
-    with open(report_file_name, "wb") as f:
-        f.write(response.content)
-    click.echo("File downloaded")
-    return report_file_name
+            soup = BeautifulSoup(html_content, features="html.parser")
+
+            table = soup.find_all("div", class_="table-responsive wyniki-table-kontrakty-godzinowe")
+            for columns in table:  # TODO these are not really columns, these are 2 columns and all headers
+                elements = columns.find_all("tr")
+                data = [(re.split("[\n\t]+", element.text.strip())) for element in elements]
+        click.echo("Data scraped")
+        return data
 
 
 def data_cleaning(
@@ -142,15 +164,7 @@ def etl_process(  # TODO: change name
     output_file: str
 ) -> None:
     company = map_data_source_to_company(data_source=data_source)
-    report_file_name = company.get_report_file_name(data_source=data_source, date_from=date_from, date_to=date_to)
-    endpoint = company.get_endpoint(date_from=date_from, date_to=date_to)
-
-    # TODO implement if underneath to classes
-    if isinstance(company, PSE):
-        download_csv_file(report_file_name=report_file_name, endpoint=endpoint, date_from=date_from, date_to=date_to)
-    elif isinstance(company, TGE):
-        scrape_data(report_file_name=report_file_name, endpoints=endpoint, date_from=date_from, date_to=date_to)
-    # data_cleaning(report_file_name=report_file_name)
+    company.get_data()
 
 
 @click.command()
