@@ -34,7 +34,7 @@ class Param(Enum):
 class Company(ABC):
     def __init__(self,
                  base_url: str,
-                 data_source: DataSources,  # TODO: check if correct type
+                 data_source: str,
                  date_from: datetime,
                  date_to: Optional[datetime] = None,
                  ) -> None:
@@ -67,7 +67,7 @@ class PSE(Company):
 
     def __init__(self,
                  base_url: str,
-                 data_source: DataSources,  # TODO: check if correct type
+                 data_source: str,
                  date_from: datetime,
                  date_to: Optional[datetime] = None,
                  ) -> None:
@@ -101,7 +101,7 @@ class PSE(Company):
 class TGE(Company):
     def __init__(self,
                  base_url: str,
-                 data_source: DataSources,  # TODO: check if correct type
+                 data_source: str,
                  date_from: datetime,
                  date_to: Optional[datetime] = None,
                  ) -> None:
@@ -148,13 +148,17 @@ def save_to_csv(
     pass
 
 
-def map_data_source_to_company(data_source: str) -> Company:
+def map_data_source_to_company(
+        data_source: str,
+        date_from: datetime,
+        date_to: Optional[datetime]
+    ) -> Company:
     if data_source == DataSources.WYK_KSE.value:
-        return PSE(base_url=DataSources.WYK_KSE.get_url())
+        return PSE(base_url=DataSources.WYK_KSE.get_url(), data_source=data_source, date_from=date_from, date_to=date_to)
     elif data_source == DataSources.GEN_MOC_JW.value:
-        return TGE(base_url=DataSources.GEN_MOC_JW.get_url())
+        return TGE(base_url=DataSources.GEN_MOC_JW.get_url(), data_source=data_source, date_from=date_from, date_to=date_to)
     elif data_source == DataSources.KONTRAKTY_GODZINOWE.value:
-        return PSE(base_url=DataSources.KONTRAKTY_GODZINOWE.get_url())
+        return PSE(base_url=DataSources.KONTRAKTY_GODZINOWE.get_url(), data_source=data_source, date_from=date_from, date_to=date_to)
 
 
 def etl_process(  # TODO: change name
@@ -163,7 +167,7 @@ def etl_process(  # TODO: change name
     date_to: Optional[datetime],
     output_file: str
 ) -> None:
-    company = map_data_source_to_company(data_source=data_source)
+    company = map_data_source_to_company(data_source=data_source, date_from=date_from, date_to=date_to)
     company.get_data()
 
 
